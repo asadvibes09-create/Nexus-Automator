@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Zen Garden</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Playfair+Display:ital@0;1&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Inter', sans-serif;
+            color: white;
+        }
+        .glass {
+            background: rgba(10, 10, 15, 0.4);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        }
+        .quote-font {
+            font-family: 'Playfair Display', serif;
+        }
+        .vibe-button {
+            transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .vibe-button::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            width: 0;
+            height: 2px;
+            background: white;
+            transition: all 0.3s ease;
+            transform: translateX(-50%);
+            opacity: 0;
+        }
+        .vibe-button.active::after {
+            width: 40%;
+            opacity: 0.5;
+        }
+        .vibe-button:hover {
+            transform: translateY(-2px);
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .vibe-button.active {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+        #canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            transition: opacity 1s ease-in-out;
+        }
+        .canvas-fade {
+            opacity: 0;
+        }
+        .ui-container {
+            position: relative;
+            z-index: 10;
+        }
+        .cursor-blink::after {
+            content: '|';
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+            from, to { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <div class="ui-container min-h-screen flex flex-col justify-between p-8 pointer-events-none">
+        <!-- Top Bar -->
+        <div class="flex justify-between items-start pointer-events-auto">
+            <div class="glass px-6 py-3 rounded-2xl">
+                <h1 class="text-xl font-light tracking-widest uppercase">Digital Zen</h1>
+            </div>
+            <div class="glass p-2 rounded-2xl flex items-center space-x-4">
+                <span class="text-sm font-light ml-4">Ambient Sound</span>
+                <button id="audio-toggle" class="w-12 h-6 bg-white/10 rounded-full relative transition-colors duration-300">
+                    <div id="audio-knob" class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform duration-300"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Center Quote -->
+        <div class="flex-grow flex items-center justify-center p-4">
+            <div id="quote-container" class="max-w-3xl text-center">
+                <p id="quote-text" class="quote-font text-3xl md:text-5xl lg:text-6xl italic font-light leading-tight"></p>
+            </div>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="flex justify-center pb-8 pointer-events-auto">
+            <div class="glass p-2 rounded-3xl flex flex-wrap justify-center gap-2">
+                <button data-vibe="neon" class="vibe-button px-6 py-3 rounded-2xl flex items-center space-x-2 active">
+                    <span class="w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,0.8)]"></span>
+                    <span class="text-sm uppercase tracking-wider">Electric Neon</span>
+                </button>
+                <button data-vibe="space" class="vibe-button px-6 py-3 rounded-2xl flex items-center space-x-2">
+                    <span class="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]"></span>
+                    <span class="text-sm uppercase tracking-wider">Deep Space</span>
+                </button>
+                <button data-vibe="rain" class="vibe-button px-6 py-3 rounded-2xl flex items-center space-x-2">
+                    <span class="w-2 h-2 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.8)]"></span>
+                    <span class="text-sm uppercase tracking-wider">Rainy Window</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration & State ---
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) console.error("Digital Zen: Canvas context could not be initialized.");
+
+        const vibeButtons = document.querySelectorAll('[data-vibe]');
+        const quoteText = document.getElementById('quote-text');
+        const audioToggle = document.getElementById('audio-toggle');
+        const audioKnob = document.getElementById('audio-knob');
+
+        let width, height;
+        let currentVibe = 'neon';
+        let animationId;
+        let audioEnabled = false;
+
+        const quotes = [
+            "The soul always knows what to do to heal itself. The challenge is to silence the mind.",
+            "Silence is not the absence of sound, but the presence of everything.",
+            "Empty your mind, be formless, shapeless – like water.",
+            "The quieter you become, the more you are able to hear.",
+            "Within you, there is a stillness and a sanctuary to which you can retreat at any time.",
+            "Breath is the bridge which connects life to consciousness."
+        ];
+
+        // --- Audio Logic ---
+        // Using Web Audio API for better looping/synthesized feel without external assets for now, 
+        // will attempt to load external loops if requested, but synth feels more "Zen" and reliable.
+        const audioStreams = {
+            neon: 'https://cdn.pixabay.com/download/audio/2022/03/24/audio_349980d2df.mp3?filename=deep-meditation-108842.mp3', // Synth
+            space: 'https://cdn.pixabay.com/download/audio/2021/11/25/audio_91b32e02f9.mp3?filename=space-ambience-5626.mp3', // Space
+            rain: 'https://cdn.pixabay.com/download/audio/2022/03/24/audio_c3639430c4.mp3?filename=rain-on-window-108844.mp3' // Rain
+        };
+
+        let activeAudio = new Audio();
+        activeAudio.loop = true;
+
+        function updateAudio() {
+            if (!audioEnabled) {
+                activeAudio.pause();
+                return;
+            }
+            activeAudio.src = audioStreams[currentVibe];
+            activeAudio.play().catch(e => console.log("Audio play blocked by browser. Click anywhere to enable."));
+        }
+
+        audioToggle.addEventListener('click', () => {
+            audioEnabled = !audioEnabled;
+            audioKnob.style.transform = audioEnabled ? 'translateX(24px)' : 'translateX(0)';
+            audioToggle.classList.toggle('bg-blue-500', audioEnabled);
+            audioToggle.classList.toggle('bg-white/10', !audioEnabled);
+            updateAudio();
+        });
+
+        // --- Typing Animation ---
+        let typingInterval;
+        function typeQuote() {
+            clearInterval(typingInterval);
+            const quote = quotes[Math.floor(Math.random() * quotes.length)];
+            quoteText.textContent = '';
+            quoteText.classList.add('cursor-blink');
+            let i = 0;
+            
+            typingInterval = setInterval(() => {
+                if (i < quote.length) {
+                    quoteText.textContent += quote.charAt(i);
+                    i++;
+                } else {
+                    clearInterval(typingInterval);
+                    setTimeout(() => quoteText.classList.remove('cursor-blink'), 2000);
+                }
+            }, 50);
+        }
+
+        // --- Resize Handler ---
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            if (width > 0 && height > 0) {
+                initVibe();
+            }
+        }
+        window.addEventListener('resize', resize);
+
+        // --- Animations ---
+        
+        // 1. Neon Vibe
+        let neonGrid = [];
+        let neonShapes = [];
+        function initNeon() {
+            neonShapes = [];
+            for (let i = 0; i < 5; i++) {
+                const hue = 280 + Math.random() * 60;
+                neonShapes.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 100 + 50,
+                    dx: (Math.random() - 0.5) * 1,
+                    dy: (Math.random() - 0.5) * 1,
+                    hue: hue
+                });
+            }
+        }
+
+        function drawNeon() {
+            ctx.fillStyle = 'rgba(5, 5, 10, 0.2)';
+            ctx.fillRect(0, 0, width, height);
+
+            const time = Date.now() * 0.001;
+            const step = 60;
+            const tilt = height * 0.6;
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(236, 72, 153, 0.3)';
+            ctx.lineWidth = 1.5;
+
+            // Horizontal lines with perspective
+            for (let y = (time * 40) % step; y < height; y += step) {
+                const ratio = y / height;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // Vertical lines with perspective
+            for (let x = -width; x < width * 2; x += step) {
+                ctx.beginPath();
+                ctx.moveTo(width / 2 + (x - width / 2) * 0.1, 0);
+                ctx.lineTo(x, height);
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // Glowing Floating Shapes
+            neonShapes.forEach(s => {
+                const pulse = Math.sin(time + s.size) * 0.5 + 1;
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size * pulse, 0, Math.PI * 2);
+                
+                const gradient = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.size * pulse);
+                gradient.addColorStop(0, `hsla(${s.hue}, 100%, 50%, 0.4)`);
+                gradient.addColorStop(1, 'transparent');
+                
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                s.x += s.dx;
+                s.y += s.dy;
+
+                if (s.x < -s.size * 2) s.x = width + s.size * 2;
+                if (s.x > width + s.size * 2) s.x = -s.size * 2;
+                if (s.y < -s.size * 2) s.y = height + s.size * 2;
+                if (s.y > height + s.size * 2) s.y = -s.size * 2;
+            });
+        }
+
+        // 2. Space Vibe
+        let stars = [];
+        let nebulae = [];
+        function initSpace() {
+            stars = [];
+            for (let i = 0; i < 200; i++) {
+                stars.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 2,
+                    speed: Math.random() * 0.05 + 0.02,
+                    opacity: Math.random(),
+                    blink: Math.random() * 0.02
+                });
+            }
+            nebulae = [];
+            for (let i = 0; i < 3; i++) {
+                nebulae.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 400 + 200,
+                    color: `hsla(${200 + Math.random() * 60}, 70%, 30%, 0.05)`
+                });
+            }
+        }
+
+        function drawSpace() {
+            ctx.fillStyle = '#010103';
+            ctx.fillRect(0, 0, width, height);
+
+            // Nebulae
+            nebulae.forEach(n => {
+                const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.size);
+                g.addColorStop(0, n.color);
+                g.addColorStop(1, 'transparent');
+                ctx.fillStyle = g;
+                ctx.fillRect(0, 0, width, height);
+            });
+
+            stars.forEach(s => {
+                s.opacity += s.blink;
+                if (s.opacity > 1 || s.opacity < 0.2) s.blink *= -1;
+
+                ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`;
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                s.y -= s.speed;
+                if (s.y < 0) s.y = height;
+            });
+        }
+
+        // 3. Rain Vibe
+        let drops = [];
+        function initRain() {
+            drops = [];
+            for (let i = 0; i < 200; i++) {
+                drops.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    len: Math.random() * 30 + 20,
+                    speed: Math.random() * 15 + 10,
+                    opacity: Math.random() * 0.3 + 0.1
+                });
+            }
+        }
+
+        function drawRain() {
+            ctx.fillStyle = 'rgba(5, 10, 15, 0.4)';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.lineCap = 'round';
+
+            drops.forEach(d => {
+                ctx.strokeStyle = `rgba(174, 194, 224, ${d.opacity * 1.5})`;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(d.x, d.y);
+                ctx.lineTo(d.x, d.y + d.len);
+                ctx.stroke();
+
+                d.y += d.speed;
+                if (d.y > height) {
+                    d.y = -d.len;
+                    d.x = Math.random() * width;
+                    
+                    // Splash
+                    ctx.strokeStyle = `rgba(174, 194, 224, ${d.opacity * 0.5})`;
+                    ctx.beginPath();
+                    ctx.ellipse(d.x, height - 5, 10 * (d.speed / 20), 3, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            });
+        }
+
+        // --- Core Loop ---
+        function initVibe() {
+            if (currentVibe === 'neon') initNeon();
+            if (currentVibe === 'space') initSpace();
+            if (currentVibe === 'rain') initRain();
+        }
+
+        function animate() {
+            if (currentVibe === 'neon') drawNeon();
+            else if (currentVibe === 'space') drawSpace();
+            else if (currentVibe === 'rain') drawRain();
+            
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // --- Interaction ---
+        vibeButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.getAttribute('data-vibe') === currentVibe) return;
+
+                // Smooth transition effect
+                canvas.classList.add('canvas-fade');
+                
+                setTimeout(() => {
+                    vibeButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentVibe = btn.getAttribute('data-vibe');
+                    initVibe();
+                    updateAudio();
+                    typeQuote();
+                    canvas.classList.remove('canvas-fade');
+                }, 1000);
+            });
+        });
+
+        // Click anywhere to resume audio (browser policy)
+        window.addEventListener('click', () => {
+            if (audioEnabled && activeAudio.paused) {
+                activeAudio.play().catch(e => {});
+            }
+        }, { once: true });
+
+        // Start
+        function startApp() {
+            resize();
+            typeQuote();
+            animate();
+            console.log("Digital Zen: Application started with vibe: " + currentVibe);
+        }
+
+        if (document.readyState === 'complete') startApp();
+        else window.addEventListener('load', startApp);
+    </script>
+</body>
+</html>
